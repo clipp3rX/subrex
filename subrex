@@ -1,0 +1,717 @@
+#!/bin/bash
+
+set -e
+
+# =========================
+# ANSI COLOR CODES
+# =========================
+
+RESET="\033[0m"
+BOLD="\033[1m"
+DIM="\033[2m"
+
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+BLUE="\033[0;34m"
+MAGENTA="\033[0;35m"
+CYAN="\033[0;36m"
+
+BRIGHT_RED="\033[1;31m"
+BRIGHT_GREEN="\033[1;32m"
+BRIGHT_YELLOW="\033[1;33m"
+BRIGHT_BLUE="\033[1;34m"
+BRIGHT_CYAN="\033[1;36m"
+BRIGHT_WHITE="\033[1;37m"
+
+# =========================
+# PROGRESS TRACKING
+# =========================
+
+TOTAL_PHASES=10
+CURRENT_PHASE=0
+
+# Draw a dot-style progress bar
+# Usage: draw_bar <filled> <total> <color_code>
+draw_bar() {
+    local filled=$1
+    local total=$2
+    local color=$3
+    local bar=""
+    for ((i=1; i<=total; i++)); do
+        if (( i <= filled )); then
+            bar+="${color}●${RESET}"
+        else
+            bar+="${DIM}○${RESET}"
+        fi
+    done
+    echo -e "$bar"
+}
+
+# Print phase progress bar (steps within a phase)
+# Usage: print_phase_bar <step> <total_steps> <label>
+print_phase_bar() {
+    local step=$1
+    local total=$2
+    local label=$3
+    local bar
+    bar=$(draw_bar "$step" "$total" "$BRIGHT_CYAN")
+    echo -e "  ${DIM}phase${RESET}   ${bar}  ${DIM}${label}${RESET}"
+}
+
+# Print overall progress bar (which phase out of 10)
+print_overall_bar() {
+    local bar
+    bar=$(draw_bar "$CURRENT_PHASE" "$TOTAL_PHASES" "$BRIGHT_GREEN")
+    local pct=$(( CURRENT_PHASE * 100 / TOTAL_PHASES ))
+    echo -e "  ${DIM}overall${RESET} ${bar}  ${BRIGHT_WHITE}${pct}%${RESET}  ${DIM}(phase ${CURRENT_PHASE}/${TOTAL_PHASES})${RESET}"
+    echo ""
+}
+
+# Called at the end of each phase to advance overall bar
+advance_phase() {
+    CURRENT_PHASE=$(( CURRENT_PHASE + 1 ))
+}
+
+# =========================
+# HELPER FUNCTIONS
+# =========================
+
+print_info() {
+    echo -e "${BRIGHT_BLUE}[INFO]${RESET}  $1"
+}
+
+print_run() {
+    echo -e "${CYAN}[RUN]${RESET}   $1"
+}
+
+print_success() {
+    echo -e "${BRIGHT_GREEN}[OK]${RESET}    $1"
+}
+
+print_warn() {
+    echo -e "${BRIGHT_YELLOW}[WARN]${RESET}  $1"
+}
+
+print_error() {
+    echo -e "${BRIGHT_RED}[ERR]${RESET}   $1"
+}
+
+print_section() {
+    local phase="$1"
+    local title="$2"
+    echo ""
+    echo -e "${DIM}────────────────────────────────────────────────────${RESET}"
+    echo -e "  ${BRIGHT_CYAN}${BOLD}[ ${phase} ]${RESET}  ${BRIGHT_WHITE}${title}${RESET}"
+    echo -e "${DIM}────────────────────────────────────────────────────${RESET}"
+    echo ""
+}
+
+# =========================
+# ADVANCED UX SYSTEM
+# =========================
+
+# ---------- ENV DETECTION ----------
+supports_unicode() {
+    [[ "$LANG" == *"UTF-8"* ]]
+}
+
+supports_nerd_font() {
+    # simple heuristic (not perfect but practical)
+    [[ "$TERM_PROGRAM" == "vscode" || "$TERM" == "xterm-256color" ]]
+}
+
+# ---------- MODE FLAGS ----------
+if supports_unicode; then
+    BOX_TOP="┌"; BOX_BOTTOM="└"; BOX_MID="│"; BOX_H="─"; BOX_TR="┐"; BOX_BR="┘"
+else
+    BOX_TOP="+"; BOX_BOTTOM="+"; BOX_MID="|"; BOX_H="-"; BOX_TR="+"; BOX_BR="+"
+fi
+
+if supports_nerd_font; then
+    ICON_INFO=""
+    ICON_RUN=""
+    ICON_OK=""
+    ICON_WARN=""
+    ICON_ERR=""
+else
+    ICON_INFO="i"
+    ICON_RUN=">"
+    ICON_OK="+"
+    ICON_WARN="!"
+    ICON_ERR="x"
+fi
+
+# ---------- COLORS ----------
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[34m"
+CYAN="\033[96m"
+BOLD="\033[1m"
+DIM="\033[2m"
+RESET="\033[0m"
+
+# ---------- TERMINAL ----------
+TERM_WIDTH=$(tput cols 2>/dev/null || echo 80)
+
+center() {
+    local text="$1"
+    printf "%*s%s\n" $(((${#text} + TERM_WIDTH) / 2)) "" "$text"
+}
+
+line() {
+    printf "%*s\n" "$TERM_WIDTH" "" | tr ' ' "$BOX_H"
+}
+
+# ---------- RUN ID ----------
+RUN_ID=$(date +"%Y%m%d_%H%M%S")
+START_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+
+# ---------- LOGGER ----------
+info() { echo -e "${BLUE}[${ICON_INFO} INFO]${RESET} $1"; }
+run()  { echo -e "${YELLOW}[${ICON_RUN} RUN ]${RESET} $1"; }
+ok()   { echo -e "${GREEN}[${ICON_OK} OK  ]${RESET} $1"; }
+warn() { echo -e "${YELLOW}[${ICON_WARN} WARN]${RESET} $1"; }
+err()  { echo -e "${RED}[${ICON_ERR} ERR ]${RESET} $1"; }
+
+# ---------- ANIMATION ----------
+animate_intro() {
+    local msg="Initializing RECCON SUB"
+    for i in {1..3}; do
+        echo -ne "${CYAN}${msg}$(printf '.%.0s' $(seq 1 $i))${RESET}\r"
+        sleep 0.3
+    done
+    echo -e "${CYAN}${msg}... done${RESET}"
+}
+
+# ---------- DYNAMIC BOX ----------
+print_box() {
+    local title="$1"
+    shift
+    local lines=("$@")
+
+    local max=${#title}
+    for l in "${lines[@]}"; do
+        (( ${#l} > max )) && max=${#l}
+    done
+
+    local width=$((max + 4))
+    local offset=$(( (TERM_WIDTH - width - 2) / 2 ))
+    [[ $offset -lt 0 ]] && offset=0
+
+    # top
+    printf "%*s%s" $offset "" "$BOX_TOP"
+    printf "%*s" $width "" | tr ' ' "$BOX_H"
+    printf "%s\n" "$BOX_TR"
+
+    # title
+    printf "%*s%s %-*s %s\n" $offset "" "$BOX_MID" $((width-2)) "$title" "$BOX_MID"
+
+    # lines
+    for l in "${lines[@]}"; do
+        printf "%*s%s %-*s %s\n" $offset "" "$BOX_MID" $((width-2)) "$l" "$BOX_MID"
+    done
+
+    # bottom
+    printf "%*s%s" $offset "" "$BOX_BOTTOM"
+    printf "%*s" $width "" | tr ' ' "$BOX_H"
+    printf "%s\n" "$BOX_BR"
+}
+
+# ---------- BANNER ----------
+print_banner() {
+    echo
+
+    local margin="  "
+
+    # Hybrid logo (clean + compact)
+    echo -e "${CYAN}${BOLD}"
+    echo -e "${margin}███████╗██╗   ██╗██████╗ ██████╗ ███████╗██╗  ██╗"
+    echo -e "${margin}██╔════╝██║   ██║██╔══██╗██╔══██╗██╔════╝╚██╗██╔╝"
+    echo -e "${margin}███████╗██║   ██║██████╔╝██████╔╝█████╗   ╚███╔╝ "
+    echo -e "${margin}╚════██║██║   ██║██╔══██╗██╔══██╗██╔══╝   ██╔██╗ "
+    echo -e "${margin}███████║╚██████╔╝██████╔╝██║  ██║███████╗██╔╝ ██╗"
+    echo -e "${margin}╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝"
+    echo -e "${RESET}"
+
+    # Clean divider (stable, no unicode issues)
+    echo -e "${DIM}${margin}==================================================${RESET}"
+
+    # Title + metadata
+    echo -e "${margin}${BOLD}${BRIGHT_WHITE}SUBREX${RESET} ${DIM}· Subdomain Recon Framework${RESET}"
+    echo -e "${margin}${DIM}Run ID  : ${RUN_ID}${RESET}"
+    echo -e "${margin}${DIM}Started : ${START_TIME}${RESET}"
+
+    echo -e "${DIM}${margin}==================================================${RESET}"
+    echo
+}
+
+print_startup_summary() {
+    local mode="Passive + Active"
+    if [[ "$USE_KNOCKPY" == false ]]; then
+        mode="Passive + Active (Knockpy disabled)"
+    fi
+    echo -e "  ${DIM}┌──────────────────────────────────────────────────┐${RESET}"
+    echo -e "  ${DIM}│${RESET}  ${BRIGHT_WHITE}Target${RESET}      ${DIM}:${RESET}  ${BRIGHT_GREEN}${DOMAIN}${RESET}"
+    echo -e "  ${DIM}│${RESET}  ${BRIGHT_WHITE}Output Dir${RESET}  ${DIM}:${RESET}  ${CYAN}${OUTPUT}/${DOMAIN}${RESET}"
+    echo -e "  ${DIM}│${RESET}  ${BRIGHT_WHITE}Threads${RESET}     ${DIM}:${RESET}  ${YELLOW}${THREADS}${RESET}"
+    echo -e "  ${DIM}│${RESET}  ${BRIGHT_WHITE}Wordlist${RESET}    ${DIM}:${RESET}  ${DIM}${WORDLIST}${RESET}"
+    echo -e "  ${DIM}│${RESET}  ${BRIGHT_WHITE}Mode${RESET}        ${DIM}:${RESET}  ${MAGENTA}${mode}${RESET}"
+    echo -e "  ${DIM}└──────────────────────────────────────────────────┘${RESET}"
+    echo ""
+}
+
+print_final_summary() {
+    local subs=$(wc -l < all_subs.txt 2>/dev/null | tr -d ' ' || echo 0)
+    local live=$(wc -l < resolved.txt 2>/dev/null | tr -d ' ' || echo 0)
+    local s200=$(wc -l < urls_200.txt 2>/dev/null | tr -d ' ' || echo 0)
+    local s403=$(wc -l < urls_403.txt 2>/dev/null | tr -d ' ' || echo 0)
+    local s302=$(wc -l < urls_302.txt 2>/dev/null | tr -d ' ' || echo 0)
+
+    local elapsed=$(( SECONDS - START_TIME ))
+    local mins=$(( elapsed / 60 ))
+    local secs=$(( elapsed % 60 ))
+    local elapsed_fmt
+    printf -v elapsed_fmt "%dm %02ds" "$mins" "$secs"
+
+    echo ""
+    echo -e "  ${BRIGHT_WHITE}${BOLD}┌──────────────────────────────────────────────────┐${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│              RECCON SUB  ·  FINAL REPORT          │${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}├──────────────────────────────────────────────────┤${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│${RESET}  ${DIM}Target      ${RESET}  ${BRIGHT_CYAN}${DOMAIN}${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│${RESET}  ${DIM}Output      ${RESET}  ${CYAN}${OUTPUT}/${DOMAIN}${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│${RESET}  ${DIM}Duration    ${RESET}  ${DIM}${elapsed_fmt}${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}├──────────────────────────────────────────────────┤${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│${RESET}  ${BRIGHT_WHITE}Total Subdomains  ${RESET}  ${BOLD}${BRIGHT_YELLOW}${subs}${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│${RESET}  ${BRIGHT_WHITE}Live Hosts        ${RESET}  ${BOLD}${BRIGHT_GREEN}${live}${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}├──────────────────────────────────────────────────┤${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│${RESET}  ${GREEN}HTTP 200${RESET}             ${BOLD}${GREEN}${s200}${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│${RESET}  ${YELLOW}HTTP 403${RESET}             ${BOLD}${YELLOW}${s403}${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}│${RESET}  ${BLUE}HTTP 302${RESET}             ${BOLD}${BLUE}${s302}${RESET}"
+    echo -e "  ${BRIGHT_WHITE}${BOLD}└──────────────────────────────────────────────────┘${RESET}"
+    echo ""
+}
+
+# =========================
+# DEFAULTS
+# =========================
+
+DOMAIN=""
+OUTPUT="recon"
+THREADS=100
+USE_KNOCKPY=false
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+
+# =========================
+# HELP MENU
+# =========================
+
+function help_menu {
+    echo ""
+    print_banner
+    echo -e "  ${BRIGHT_WHITE}${BOLD}USAGE${RESET}"
+    echo -e "  ${DIM}──────────────────────────────────────────────────${RESET}"
+    echo -e "    $0 ${CYAN}-d <domain>${RESET} ${DIM}[options]${RESET}"
+    echo ""
+    echo -e "  ${BRIGHT_WHITE}${BOLD}REQUIRED${RESET}"
+    echo -e "  ${DIM}──────────────────────────────────────────────────${RESET}"
+    echo -e "    ${CYAN}-d <domain>${RESET}        Target domain to enumerate"
+    echo ""
+    echo -e "  ${BRIGHT_WHITE}${BOLD}OPTIONS${RESET}"
+    echo -e "  ${DIM}──────────────────────────────────────────────────${RESET}"
+    echo -e "    ${YELLOW}-o <directory>${RESET}     Output directory ${DIM}(default: recon)${RESET}"
+    echo -e "    ${YELLOW}-k${RESET}                 Enable Knockpy slow brute-force"
+    echo -e "    ${YELLOW}-h${RESET}                 Display this help menu"
+    echo ""
+    echo -e "  ${BRIGHT_WHITE}${BOLD}EXAMPLE${RESET}"
+    echo -e "  ${DIM}──────────────────────────────────────────────────${RESET}"
+    echo -e "    ${DIM}\$${RESET} $0 ${CYAN}-d${RESET} example.com ${YELLOW}-o${RESET} results ${YELLOW}-k${RESET}"
+    echo ""
+}
+
+# =========================
+# ARG PARSE
+# =========================
+
+while getopts "d:o:kh" opt; do
+    case $opt in
+        d) DOMAIN=$OPTARG ;;
+        o) OUTPUT=$OPTARG ;;
+        k) USE_KNOCKPY=true ;;
+        h) help_menu; exit 0 ;;
+        *) help_menu; exit 1 ;;
+    esac
+done
+
+if [[ -z "$DOMAIN" ]]; then
+    help_menu
+    exit 1
+fi
+
+# =========================
+# TIMER START
+# =========================
+
+START_TIME=$SECONDS
+
+# =========================
+# BANNER
+# =========================
+
+print_banner
+
+# =========================
+# WORDLIST AUTO DETECT
+# =========================
+
+if [[ -f /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt ]]; then
+    WORDLIST="/usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+elif [[ -f /usr/share/seclists/Discovery/DNS/dns-Jhaddix.txt ]]; then
+    WORDLIST="/usr/share/seclists/Discovery/DNS/dns-Jhaddix.txt"
+elif [[ -f /usr/share/seclists/Discovery/DNS/namelist.txt ]]; then
+    WORDLIST="/usr/share/seclists/Discovery/DNS/namelist.txt"
+else
+    print_error "No wordlist found. Please install seclists."
+    exit 1
+fi
+
+if [[ -f /usr/share/seclists/Miscellaneous/dns-resolvers.txt ]]; then
+    RESOLVERS="/usr/share/seclists/Miscellaneous/dns-resolvers.txt"
+else
+    print_warn "No resolver list found, using system DNS"
+    RESOLVERS=""
+fi
+
+mkdir -p "$OUTPUT/$DOMAIN"
+cd "$OUTPUT/$DOMAIN" || { print_error "Failed to change to output directory"; exit 1; }
+
+# =========================
+# STARTUP SUMMARY
+# =========================
+
+print_startup_summary
+
+# =========================
+# 1. PASSIVE ENUM
+# =========================
+
+print_section "PHASE 1" "PASSIVE ENUMERATION"
+print_phase_bar 0 5 "starting..."
+print_overall_bar
+
+print_run "Running subfinder..."
+command -v subfinder >/dev/null 2>&1 && subfinder -d "$DOMAIN" -all -silent >> passive.txt || true
+print_phase_bar 1 5 "subfinder done"
+
+print_run "Running assetfinder..."
+command -v assetfinder >/dev/null 2>&1 && assetfinder --subs-only "$DOMAIN" >> passive.txt || true
+print_phase_bar 2 5 "assetfinder done"
+
+print_run "Running chaos..."
+command -v chaos >/dev/null 2>&1 && chaos -d "$DOMAIN" -silent >> passive.txt || true
+print_phase_bar 3 5 "chaos done"
+
+print_run "Running sublist3r..."
+command -v sublist3r >/dev/null 2>&1 && sublist3r -d "$DOMAIN" -t 50 2>/dev/null >> passive.txt || true
+print_phase_bar 4 5 "sublist3r done"
+
+print_run "Querying crt.sh certificate transparency logs..."
+command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && \
+curl -s "https://crt.sh/?q=%25.$DOMAIN&output=json" \
+| jq -r '.[].name_value' 2>/dev/null \
+| sed 's/\*\.//g' >> passive.txt || true
+print_phase_bar 5 5 "crt.sh done"
+
+print_run "Checking GitHub and GitLab sources..."
+command -v github-subdomains >/dev/null 2>&1 && [[ -n "$GITHUB_TOKEN" ]] && \
+github-subdomains -d "$DOMAIN" -t "$GITHUB_TOKEN" >> passive.txt 2>/dev/null || true
+command -v gitlab-subdomains >/dev/null 2>&1 && \
+gitlab-subdomains -d "$DOMAIN" >> passive.txt 2>/dev/null || true
+
+sort -u passive.txt > all_subs.txt
+print_phase_bar 4 4 "complete"
+advance_phase
+print_overall_bar
+print_success "Passive enumeration done → $(wc -l < all_subs.txt | tr -d ' ') unique subdomains"
+
+# =========================
+# 2. ACTIVE BRUTE
+# =========================
+
+print_section "PHASE 2" "ACTIVE BRUTEFORCE"
+print_phase_bar 0 3 "starting..."
+print_overall_bar
+
+print_run "Running shuffledns..."
+command -v shuffledns >/dev/null 2>&1 && \
+shuffledns -d "$DOMAIN" -w "$WORDLIST" -silent >> brute.txt 2>/dev/null || true
+print_phase_bar 1 3 "shuffledns done"
+
+print_run "Running puredns bruteforce..."
+command -v puredns >/dev/null 2>&1 && \
+puredns bruteforce "$WORDLIST" "$DOMAIN" \
+    ${RESOLVERS:+--resolvers "$RESOLVERS"} \
+    -q >> brute.txt 2>/dev/null || true
+print_phase_bar 2 3 "puredns done"
+
+print_run "Generating altdns permutations..."
+command -v altdns >/dev/null 2>&1 && \
+altdns -i all_subs.txt -o perms.txt -w "$WORDLIST" 2>/dev/null || true
+[[ -f perms.txt ]] && command -v puredns >/dev/null 2>&1 && \
+puredns resolve perms.txt -q >> brute.txt 2>/dev/null || true
+
+if $USE_KNOCKPY; then
+    print_run "Running Knockpy (slow brute — this may take a while)..."
+    command -v knockpy >/dev/null 2>&1 && \
+    knockpy "$DOMAIN" --wordlist "$WORDLIST" --silent > knockpy.txt 2>/dev/null || true
+    [[ -f knockpy.txt ]] && grep "$DOMAIN" knockpy.txt >> brute.txt || true
+fi
+
+sort -u brute.txt >> all_subs.txt
+sort -u all_subs.txt -o all_subs.txt
+print_phase_bar 3 3 "complete"
+advance_phase
+print_overall_bar
+print_success "Active bruteforce done → $(wc -l < all_subs.txt | tr -d ' ') total unique subdomains"
+
+# =========================
+# 3. ASN DISCOVERY
+# =========================
+
+print_section "PHASE 3" "ASN DISCOVERY"
+print_phase_bar 0 2 "starting..."
+print_overall_bar
+
+print_run "Enumerating ASNs via amass intel..."
+command -v amass >/dev/null 2>&1 && \
+amass intel -org "$DOMAIN" -active -whois 2>/dev/null \
+| grep -oP 'AS\d+' > asn.txt 2>/dev/null || true
+print_phase_bar 1 2 "amass done"
+
+print_run "Checking whois origin ASNs..."
+command -v whois >/dev/null 2>&1 && \
+whois "$DOMAIN" 2>/dev/null | grep -i origin | awk '{print $2}' >> asn.txt 2>/dev/null || true
+
+sort -u asn.txt -o asn.txt
+print_phase_bar 2 2 "complete"
+advance_phase
+print_overall_bar
+print_success "ASN discovery done → $(wc -l < asn.txt | tr -d ' ') ASNs found"
+
+# =========================
+# 4. ASN EXPANSION
+# =========================
+
+print_section "PHASE 4" "ASN EXPANSION"
+print_overall_bar
+
+> cidr.txt
+> asn_domains.txt
+
+asn_total=$(wc -l < asn.txt | tr -d ' ')
+asn_count=0
+
+while read asn; do
+    [[ -z "$asn" ]] && continue
+    asn_count=$(( asn_count + 1 ))
+
+    print_run "Expanding ASN: ${asn}..."
+    command -v amass >/dev/null 2>&1 && \
+    amass enum -asn "$asn" -silent >> asn_domains.txt 2>/dev/null || true
+
+    command -v whois >/dev/null 2>&1 && \
+    whois -h whois.radb.net -- "-i origin $asn" 2>/dev/null \
+    | grep -Eo "([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]+" >> cidr.txt 2>/dev/null || true
+
+    print_phase_bar "$asn_count" "$asn_total" "ASN ${asn} expanded"
+
+done < asn.txt
+
+sort -u asn_domains.txt >> all_subs.txt
+sort -u cidr.txt -o cidr.txt
+advance_phase
+print_overall_bar
+print_success "ASN expansion done → $(wc -l < cidr.txt | tr -d ' ') CIDR ranges"
+
+# =========================
+# 5. REVERSE DNS
+# =========================
+
+print_section "PHASE 5" "REVERSE DNS"
+print_overall_bar
+
+> revdns.txt
+
+cidr_total=$(wc -l < cidr.txt | tr -d ' ')
+cidr_count=0
+
+command -v prips >/dev/null 2>&1 && command -v dnsx >/dev/null 2>&1 && \
+while read cidr; do
+    [[ -z "$cidr" ]] && continue
+    cidr_count=$(( cidr_count + 1 ))
+
+    print_run "PTR lookup: ${cidr}..."
+    prips "$cidr" 2>/dev/null \
+    | dnsx -ptr -silent -resp-only >> revdns.txt 2>/dev/null || true
+
+    print_phase_bar "$cidr_count" "$cidr_total" "${cidr} done"
+
+done < cidr.txt
+
+sort -u revdns.txt >> all_subs.txt
+sort -u all_subs.txt -o all_subs.txt
+advance_phase
+print_overall_bar
+print_success "Reverse DNS done → $(wc -l < revdns.txt | tr -d ' ') PTR records resolved"
+
+# =========================
+# 6. CLEAN SCOPE
+# =========================
+
+print_section "PHASE 6" "SCOPE CLEANING"
+print_phase_bar 0 2 "starting..."
+print_overall_bar
+
+print_run "Filtering to in-scope domain: ${DOMAIN}..."
+domain_escaped=$(printf '%s\n' "$DOMAIN" | sed 's/[[\.*^$/]/\\&/g')
+grep -E "\.${domain_escaped}$|^${domain_escaped}$" all_subs.txt > scoped.txt || true
+print_phase_bar 1 2 "scoped"
+
+print_run "Removing CDN/cloud noise..."
+grep -Ev "cloudfront|akamai|amazonaws|cdn|edgesuite" scoped.txt > final.txt || true
+mv final.txt all_subs.txt
+
+print_phase_bar 2 2 "complete"
+advance_phase
+print_overall_bar
+print_success "Scope clean → $(wc -l < all_subs.txt | tr -d ' ') subdomains remaining"
+
+# =========================
+# 7. DNS RESOLVE
+# =========================
+
+print_section "PHASE 7" "DNS RESOLUTION"
+print_phase_bar 0 1 "resolving..."
+print_overall_bar
+
+print_run "Resolving all subdomains with dnsx (threads: ${THREADS})..."
+command -v dnsx >/dev/null 2>&1 && \
+dnsx -l all_subs.txt -silent -threads "$THREADS" \
+| sort -u > resolved.txt
+
+print_phase_bar 1 1 "complete"
+advance_phase
+print_overall_bar
+print_success "DNS resolution done → $(wc -l < resolved.txt 2>/dev/null | tr -d ' ' || echo 0) live hosts"
+
+# =========================
+# 8. HTTP PROBE
+# =========================
+
+print_section "PHASE 8" "HTTP PROBING"
+print_phase_bar 0 1 "probing..."
+print_overall_bar
+
+print_run "Probing live hosts with httpx (threads: ${THREADS})..."
+command -v httpx >/dev/null 2>&1 && \
+httpx -l resolved.txt \
+    -silent \
+    -threads "$THREADS" \
+    -status-code \
+    -title \
+    -tech-detect \
+    -follow-redirects \
+    -timeout 10 \
+    -retries 2 \
+    -o httpx.txt
+
+print_phase_bar 1 1 "complete"
+advance_phase
+print_overall_bar
+print_success "HTTP probe done → $(wc -l < httpx.txt 2>/dev/null | tr -d ' ' || echo 0) responses captured"
+
+# =========================
+# 9. STATUS FILTER
+# =========================
+
+print_section "PHASE 9" "STATUS CODE FILTERING"
+print_phase_bar 0 4 "filtering..."
+print_overall_bar
+
+grep "\[200\]" httpx.txt > 200.txt || true
+print_phase_bar 1 4 "200s filtered"
+
+grep "\[403\]" httpx.txt > 403.txt || true
+print_phase_bar 2 4 "403s filtered"
+
+grep "\[302\]" httpx.txt > 302.txt || true
+print_phase_bar 3 4 "302s filtered"
+
+grep -v "\[200\]\|\[403\]\|\[302\]" httpx.txt > other.txt || true
+print_phase_bar 4 4 "complete"
+
+advance_phase
+print_overall_bar
+print_info "200 OK        → $(wc -l < 200.txt | tr -d ' ') hosts"
+print_info "403 Forbidden → $(wc -l < 403.txt | tr -d ' ') hosts"
+print_info "302 Redirect  → $(wc -l < 302.txt | tr -d ' ') hosts"
+print_info "Other codes   → $(wc -l < other.txt | tr -d ' ') hosts"
+
+# =========================
+# 10. CLEAN URLS
+# =========================
+
+print_section "PHASE 10" "URL EXTRACTION"
+print_phase_bar 0 4 "extracting..."
+print_overall_bar
+
+awk '{print $1}' httpx.txt | sort -u > urls.txt
+print_phase_bar 1 4 "urls.txt done"
+
+grep "\[200\]" httpx.txt | awk '{print $1}' > urls_200.txt || true
+print_phase_bar 2 4 "urls_200 done"
+
+grep "\[403\]" httpx.txt | awk '{print $1}' > urls_403.txt || true
+grep "\[302\]" httpx.txt | awk '{print $1}' > urls_302.txt || true
+print_phase_bar 3 4 "urls_403 / urls_302 done"
+
+grep -vE "js|css|png|jpg|svg|cdn" urls.txt > clean_urls.txt || true
+print_phase_bar 4 4 "complete"
+
+advance_phase
+print_overall_bar
+print_success "URL extraction done → $(wc -l < clean_urls.txt | tr -d ' ') clean URLs"
+
+cleanup_empty_files() {
+    local removed=0
+    for f in *.txt; do
+        [[ -f "$f" ]] || continue
+        if [[ ! -s "$f" ]]; then
+            rm -f "$f"
+            print_info "Removed empty file → ${DIM}${f}${RESET}"
+            removed=$(( removed + 1 ))
+        fi
+    done
+    if (( removed == 0 )); then
+        print_success "No empty files found"
+    else
+        print_success "Cleanup done → ${removed} empty file(s) removed"
+    fi
+}
+
+# =========================
+# 11. FINAL SUMMARY
+# =========================
+
+print_section "COMPLETE" "RECON FINISHED"
+
+# =========================
+# 12. CLEANUP EMPTY FILES
+# =========================
+
+print_section "CLEANUP" "REMOVING EMPTY OUTPUT FILES"
+cleanup_empty_files
+
+print_section "COMPLETE" "RECON FINISHED"
+print_final_summary
