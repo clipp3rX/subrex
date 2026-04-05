@@ -51,6 +51,7 @@ It combines multiple industry-standard tools into a **single workflow**, produci
 * jq
 * curl
 * whois
+* sublist3r
 
 ---
 
