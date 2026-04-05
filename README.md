@@ -78,7 +78,8 @@ chmod +x install.sh
 ### 3. Make SUBREX Global (Run from Anywhere)
 
 ```bash
-sudo ln -sf $(pwd)/subrex.sh /usr/local/bin/subrex
+chmod +x subrex
+sudo ln -sf "$(pwd)/subrex" /usr/local/bin/subrex
 ```
 
 ---
