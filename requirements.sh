@@ -21,6 +21,12 @@ if ! command -v go >/dev/null 2>&1; then
     sudo apt install -y golang
 fi
 
+# Add Go bin to PATH permanently
+if ! grep -q 'go env GOPATH' ~/.bashrc; then
+    echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc
+    source ~/.bashrc
+fi
+
 export PATH=$PATH:$(go env GOPATH)/bin
 
 # =========================
@@ -35,6 +41,7 @@ go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
 go install github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest
 go install github.com/tomnomnom/assetfinder@latest
 go install github.com/owasp-amass/amass/v4/...@master
+go install github.com/d3mondev/puredns/v2@latest   # ✅ FIXED
 
 # =========================
 # PYTHON TOOLS
@@ -43,7 +50,7 @@ go install github.com/owasp-amass/amass/v4/...@master
 echo "[+] Installing Python tools..."
 
 pip3 install --upgrade pip --break-system-packages
-pip3 install puredns altdns sublist3r --break-system-packages
+pip3 install altdns sublist3r --break-system-packages
 
 # =========================
 # WORDLISTS (SECLISTS)
@@ -52,6 +59,25 @@ pip3 install puredns altdns sublist3r --break-system-packages
 if [[ ! -d "/usr/share/seclists" ]]; then
     echo "[+] Installing SecLists..."
     sudo apt install -y seclists
+fi
+
+# =========================
+# GLOBAL INSTALL SUBREX
+# =========================
+
+echo "[+] Setting up global command..."
+
+chmod +x subrex
+sudo ln -sf "$(pwd)/subrex" /usr/local/bin/subrex
+
+# =========================
+# VERIFY INSTALL
+# =========================
+
+if command -v subrex >/dev/null 2>&1; then
+    echo "[+] SUBREX installed globally"
+else
+    echo "[!] Failed to link subrex"
 fi
 
 echo "[+] All tools installed successfully"
