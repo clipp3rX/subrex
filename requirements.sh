@@ -42,8 +42,8 @@ go install github.com/owasp-amass/amass/v4/...@master
 
 echo "[+] Installing Python tools..."
 
-pip3 install --upgrade pip
-pip3 install puredns altdns sublist3r
+pip3 install --upgrade pip --break-system-packages
+pip3 install puredns altdns sublist3r --break-system-packages
 
 # =========================
 # WORDLISTS (SECLISTS)
