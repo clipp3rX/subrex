@@ -102,26 +102,21 @@ subrex -d example.com
 
 ### Options
 
-```bash
+```
+bash
 -d <domain>        Target domain (required)
 -o <directory>     Output directory (default: recon)
 -k                 Enable knockpy brute-force
 -h                 Show help menu
 ```
 
-```
 
----
 
-## ▶️ Usage
-
-```bash
-./subrex.sh -d example.com
-```
 
 ### Options
 
-```bash
+```
+bash
 -d <domain>        Target domain (required)
 -o <directory>     Output directory (default: recon)
 -k                 Enable knockpy (slow brute-force)
