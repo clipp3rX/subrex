@@ -114,19 +114,6 @@ subrex -d example.com
 bash
 -d <domain>        Target domain (required)
 -o <directory>     Output directory (default: recon)
--k                 Enable knockpy brute-force
--h                 Show help menu
-```
-
-
-
-
-### Options
-
-```
-bash
--d <domain>        Target domain (required)
--o <directory>     Output directory (default: recon)
 -k                 Enable knockpy (slow brute-force)
 -h                 Show help menu
 ```
@@ -177,7 +164,7 @@ Subdomain Enum → ASN Expansion → DNS Resolve → HTTP Probe → Filtering �
 ### Permission denied
 
 ```bash
-chmod +x subrex.sh
+chmod +x subrex
 ```
 
 ### Missing tools
