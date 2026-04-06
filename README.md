@@ -1,5 +1,12 @@
 # 🔍 SUBREX — Subdomain Reconnaissance Framework
 
+![Version](https://img.shields.io/badge/version-1.0-blue)
+![Bash](https://img.shields.io/badge/shell-bash-green)
+![Platform](https://img.shields.io/badge/platform-linux-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-orange)
+![Status](https://img.shields.io/badge/status-active-success)
+![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen)
+
 <p align="center">
   <b>Automated, fast, and structured subdomain reconnaissance pipeline</b><br>
   Built for bug bounty hunters & penetration testers
